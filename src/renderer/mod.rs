@@ -235,6 +235,39 @@ impl VoxelRenderer {
         }
     }
 
+    pub fn update_camera(&mut self, queue: &Queue, eye: na::Point3<f32>, target: na::Point3<f32>) {
+        let width = self.surface_config.width as f32;
+        let height = self.surface_config.height as f32;
+
+        let aspect_ratio = width / height;
+        let fov_y = 60.0_f32.to_radians();  // Wider FOV to see more of the room
+        let near = 0.1;
+        let far = 1000.0;
+
+        let up = na::Vector3::new(0.0, 1.0, 0.0);
+        let view = na::Matrix4::look_at_rh(&eye, &target, &up);
+        let proj = na::Matrix4::new_perspective(aspect_ratio, fov_y, near, far);
+        let view_proj = proj * view;
+
+        let forward = (target - eye).normalize();
+
+        let camera_data = CameraData {
+            view_proj: view_proj.into(),
+            position: [eye.x, eye.y, eye.z],
+            _padding1: 0.0,
+            forward: [forward.x, forward.y, forward.z],
+            _padding2: 0.0,
+            screen_size: [width, height],
+            _padding3: [0.0; 2],
+        };
+
+        queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            bytemuck::cast_slice(&[camera_data]),
+        );
+    }
+
     pub fn render(&mut self, device: &Device, queue: &Queue) {
         let now = Instant::now();
         let delta_time = now.duration_since(self.last_frame_time).as_secs_f32();
@@ -299,13 +332,13 @@ impl VoxelRenderer {
 
     fn create_camera_data(width: f32, height: f32) -> CameraData {
         let aspect_ratio = width / height;
-        let fov_y = 45.0_f32.to_radians();
+        let fov_y = 60.0_f32.to_radians();  // Wider FOV to see more of the room
         let near = 0.1;
         let far = 1000.0;
 
-        // Camera positioned to look into Cornell Box (same as screenshot default)
-        let eye = na::Point3::new(0.0, 1.0, -2.5);
-        let target = na::Point3::new(0.0, 1.0, 1.0);
+        // Camera positioned outside the box looking in
+        let eye = na::Point3::new(0.0, 1.0, -1.0);
+        let target = na::Point3::new(0.0, 1.0, 0.0);
         let up = na::Vector3::new(0.0, 1.0, 0.0);
 
         let view = na::Matrix4::look_at_rh(&eye, &target, &up);

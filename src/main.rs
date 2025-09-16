@@ -1,10 +1,13 @@
 use wgpu::*;
 use wgpu::util::DeviceExt;
 use winit::{
-    event::{Event, WindowEvent},
+    event::{Event, WindowEvent, ElementState, DeviceEvent},
     event_loop::EventLoop,
     window::Window,
+    keyboard::{KeyCode, PhysicalKey},
 };
+use std::collections::HashSet;
+use nalgebra as na;
 use env_logger;
 use log::info;
 use std::sync::Arc;
@@ -71,12 +74,119 @@ async fn run(args: Args) {
     }
 }
 
+struct Application {
+    renderer: VoxelRenderer,
+    device: Device,
+    queue: Queue,
+    camera_position: na::Point3<f32>,
+    camera_yaw: f32,   // Horizontal rotation (radians)
+    camera_pitch: f32, // Vertical rotation (radians)
+    camera_speed: f32,
+    mouse_sensitivity: f32,
+    keys_pressed: HashSet<KeyCode>,
+}
+
+impl Application {
+    fn new(device: Device, queue: Queue, renderer: VoxelRenderer) -> Self {
+        Self {
+            renderer,
+            device,
+            queue,
+            camera_position: na::Point3::new(0.0, 1.0, -1.0),  // Start outside, looking in
+            camera_yaw: 0.0,    // Looking straight ahead (positive Z)
+            camera_pitch: 0.0,  // Level view
+            camera_speed: 0.05,
+            mouse_sensitivity: 0.002,
+            keys_pressed: HashSet::new(),
+        }
+    }
+
+    fn get_camera_direction(&self) -> na::Vector3<f32> {
+        // Calculate forward direction from yaw and pitch
+        na::Vector3::new(
+            self.camera_yaw.sin() * self.camera_pitch.cos(),
+            self.camera_pitch.sin(),
+            self.camera_yaw.cos() * self.camera_pitch.cos(),
+        )
+    }
+
+    fn update_camera(&mut self) {
+        let forward = self.get_camera_direction();
+        let right = na::Vector3::y().cross(&forward).normalize();
+
+        let mut movement = na::Vector3::zeros();
+
+        // WASD movement (relative to view direction)
+        if self.keys_pressed.contains(&KeyCode::KeyW) {
+            let forward_horizontal = na::Vector3::new(forward.x, 0.0, forward.z).normalize();
+            movement += forward_horizontal; // Forward (no vertical)
+        }
+        if self.keys_pressed.contains(&KeyCode::KeyS) {
+            let forward_horizontal = na::Vector3::new(forward.x, 0.0, forward.z).normalize();
+            movement -= forward_horizontal; // Backward
+        }
+        if self.keys_pressed.contains(&KeyCode::KeyA) {
+            movement -= right;
+        }
+        if self.keys_pressed.contains(&KeyCode::KeyD) {
+            movement += right;
+        }
+
+        // Vertical movement
+        if self.keys_pressed.contains(&KeyCode::Space) {
+            movement.y += 1.0;
+        }
+        if self.keys_pressed.contains(&KeyCode::ShiftLeft) {
+            movement.y -= 1.0;
+        }
+
+        // Apply movement
+        if movement.magnitude() > 0.0 {
+            movement = movement.normalize() * self.camera_speed;
+            self.camera_position += movement;
+        }
+
+        // Always update camera to apply look direction
+        let camera_target = self.camera_position + self.get_camera_direction();
+        self.renderer.update_camera(&self.queue, self.camera_position, camera_target);
+    }
+
+    fn handle_mouse_motion(&mut self, delta_x: f64, delta_y: f64) {
+        // Update yaw (horizontal rotation) - positive delta_x should turn right
+        self.camera_yaw += delta_x as f32 * self.mouse_sensitivity;
+
+        // Update pitch (vertical rotation) with clamping - positive delta_y should look down
+        // But mouse delta_y is inverted (positive = move down), so we need to negate it
+        self.camera_pitch -= delta_y as f32 * self.mouse_sensitivity;
+        self.camera_pitch = self.camera_pitch.clamp(-1.5, 1.5); // Limit to ~85 degrees up/down
+    }
+
+    fn handle_key(&mut self, keycode: KeyCode, state: ElementState) {
+        match state {
+            ElementState::Pressed => {
+                self.keys_pressed.insert(keycode);
+            }
+            ElementState::Released => {
+                self.keys_pressed.remove(&keycode);
+            }
+        }
+    }
+
+    fn render(&mut self) {
+        self.renderer.render(&self.device, &self.queue);
+    }
+
+    fn resize(&mut self, width: u32, height: u32) {
+        self.renderer.resize(&self.device, &self.queue, width, height);
+    }
+}
+
 async fn run_interactive_mode(args: Args) {
     let event_loop = EventLoop::new().unwrap();
 
     #[allow(deprecated)]
     let window = Arc::new(event_loop.create_window(Window::default_attributes()
-        .with_title("Adaptive Voxel Path Tracer")
+        .with_title("Adaptive Voxel Path Tracer - WASD: Move, Space/Shift: Up/Down, ESC: Exit")
         .with_inner_size(winit::dpi::LogicalSize::new(args.width, args.height))).unwrap());
 
     // Initialize WebGPU
@@ -100,7 +210,14 @@ async fn run_interactive_mode(args: Args) {
     ).await.unwrap();
 
     let size = window.inner_size();
-    let mut renderer = VoxelRenderer::new(&device, &queue, &adapter, surface, size.width, size.height);
+    let renderer = VoxelRenderer::new(&device, &queue, &adapter, surface, size.width, size.height);
+    let mut app = Application::new(device, queue, renderer);
+
+    // Capture mouse cursor for FPS controls
+    let _ = window.set_cursor_grab(winit::window::CursorGrabMode::Confined);
+    window.set_cursor_visible(false);
+
+    info!("Controls: WASD - Move, Space/Shift - Up/Down, Mouse - Look around, ESC - Exit");
 
     #[allow(deprecated)]
     let _ = event_loop.run(move |event, control_flow| {
@@ -115,15 +232,37 @@ async fn run_interactive_mode(args: Args) {
                     }
                     WindowEvent::Resized(physical_size) => {
                         if physical_size.width > 0 && physical_size.height > 0 {
-                            renderer.resize(&device, &queue, physical_size.width, physical_size.height);
+                            app.resize(physical_size.width, physical_size.height);
                         }
                     }
                     WindowEvent::RedrawRequested => {
-                        renderer.render(&device, &queue);
+                        app.update_camera();
+                        app.render();
                         window.request_redraw();
+                    }
+                    WindowEvent::KeyboardInput {
+                        event: winit::event::KeyEvent {
+                            physical_key: PhysicalKey::Code(keycode),
+                            state,
+                            ..
+                        },
+                        ..
+                    } => {
+                        app.handle_key(keycode, state);
+
+                        // Escape key to exit
+                        if keycode == KeyCode::Escape && state == ElementState::Pressed {
+                            control_flow.exit();
+                        }
                     }
                     _ => {}
                 }
+            }
+            Event::DeviceEvent {
+                event: DeviceEvent::MouseMotion { delta },
+                ..
+            } => {
+                app.handle_mouse_motion(delta.0, delta.1);
             }
             Event::AboutToWait => {
                 window.request_redraw();
@@ -275,7 +414,7 @@ async fn render_screenshot_frame(
     let up = na::Vector3::new(0.0, 1.0, 0.0);
 
     let aspect_ratio = width as f32 / height as f32;
-    let fov_y = 45.0_f32.to_radians();
+    let fov_y = 60.0_f32.to_radians();  // Wider FOV to match interactive mode
     let near = 0.1;
     let far = 1000.0;
 

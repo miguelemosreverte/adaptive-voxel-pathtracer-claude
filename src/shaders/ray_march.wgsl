@@ -19,7 +19,7 @@ fn get_ray_direction(screen_uv: vec2<f32>, camera: CameraData) -> vec3<f32> {
     // Convert to NDC, but flip Y to correct for inverted image
     let ndc = vec2<f32>(screen_uv.x * 2.0 - 1.0, 1.0 - screen_uv.y * 2.0);
     let aspect_ratio = camera.screen_size.x / camera.screen_size.y;
-    let fov_tan = tan(radians(45.0) * 0.5);
+    let fov_tan = tan(radians(60.0) * 0.5);  // Wider FOV to see more of the room
 
     let right = normalize(cross(vec3<f32>(0.0, 1.0, 0.0), camera.forward));
     let up = cross(camera.forward, right);
@@ -34,8 +34,9 @@ fn get_ray_direction(screen_uv: vec2<f32>, camera: CameraData) -> vec3<f32> {
 }
 
 fn get_adaptive_step_size(distance_from_camera: f32, base_voxel_size: f32) -> f32 {
-    // Use smaller steps for better accuracy in Cornell Box
-    return 0.01;
+    // Use very small steps to ensure we don't miss thin walls
+    // Wall thickness is 0.02, so use step size < wall_thickness/2
+    return 0.005;
 }
 
 fn ray_box_intersection(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> {
@@ -61,7 +62,7 @@ fn sample_voxel(position: vec3<f32>) -> vec4<f32> {
     // The box goes from -1 to 1 in X, 0 to 2 in Y, 0 to 2 in Z
     // Camera looks from negative Z towards positive Z (into the box)
 
-    let wall_thickness = 0.02;
+    let wall_thickness = 0.05;  // Thicker walls to ensure they're hit
 
     // Floor (white)
     if position.y >= -wall_thickness && position.y <= wall_thickness {
@@ -83,7 +84,8 @@ fn sample_voxel(position: vec3<f32>) -> vec4<f32> {
 
     // Back wall (white) - at far Z
     if position.z >= 2.0 - wall_thickness && position.z <= 2.0 + wall_thickness {
-        if position.x >= -1.0 && position.x <= 1.0 && position.y >= 0.0 && position.y <= 2.0 {
+        if position.x >= -1.0 - wall_thickness && position.x <= 1.0 + wall_thickness &&
+           position.y >= -wall_thickness && position.y <= 2.0 + wall_thickness {
             return vec4<f32>(0.73, 0.73, 0.73, 1.0);
         }
     }
@@ -102,7 +104,7 @@ fn sample_voxel(position: vec3<f32>) -> vec4<f32> {
         }
     }
 
-    // Note: No front wall - camera looks through the opening
+    // Note: Cornell Box traditionally has no front wall (open where camera looks from)
 
     // Tall box (white) - on the floor, left side
     let tall_center = vec3<f32>(-0.35, 0.3, 0.65);
@@ -169,8 +171,10 @@ fn ray_march_compute(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let ray_direction = get_ray_direction(screen_uv, camera_data);
 
     // Test ray-box intersection with scene bounds (Cornell Box)
-    let scene_min = vec3<f32>(-1.5, -0.5, -0.5);
-    let scene_max = vec3<f32>(1.5, 2.5, 2.5);
+    // Cornell Box actual bounds: X: -1 to 1, Y: 0 to 2, Z: 0 to 2
+    // Extend slightly to ensure we capture walls
+    let scene_min = vec3<f32>(-1.1, -0.1, -0.1);
+    let scene_max = vec3<f32>(1.1, 2.1, 2.1);
     let intersection = ray_box_intersection(ray_origin, ray_direction, scene_min, scene_max);
 
     var accumulated_color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
@@ -179,8 +183,9 @@ fn ray_march_compute(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var current_pos = ray_origin + ray_direction * intersection.x;
         let max_distance = intersection.y - intersection.x;
         var distance_traveled = 0.0;
+        var hit_something = false;
 
-        for (var i = 0; i < 200 && distance_traveled < max_distance; i++) {
+        for (var i = 0; i < 500 && distance_traveled < max_distance; i++) {
             let distance_from_camera = length(current_pos - ray_origin);
             let step_size = get_adaptive_step_size(distance_from_camera, performance_data.base_voxel_size);
 
@@ -189,25 +194,26 @@ fn ray_march_compute(@builtin(global_invocation_id) global_id: vec3<u32>) {
             // If we hit a solid voxel, use its color directly
             if voxel_data.a > 0.5 {
                 accumulated_color = voxel_data;
+                hit_something = true;
                 break;
             }
 
             current_pos = current_pos + ray_direction * step_size;
             distance_traveled = distance_traveled + step_size;
         }
-    }
 
-    // Background gradient
-    if accumulated_color.a < 0.99 {
+        // If ray didn't hit anything inside the box, show black (empty space)
+        if !hit_something {
+            accumulated_color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        }
+    } else {
+        // Ray missed the scene bounds entirely - show background
         let background = mix(
             vec3<f32>(0.5, 0.7, 0.9),
             vec3<f32>(0.1, 0.2, 0.4),
             screen_uv.y
         );
-        accumulated_color = vec4<f32>(
-            mix(background, accumulated_color.rgb, accumulated_color.a),
-            1.0
-        );
+        accumulated_color = vec4<f32>(background, 1.0);
     }
 
     textureStore(output_texture, pixel_coord, accumulated_color);
