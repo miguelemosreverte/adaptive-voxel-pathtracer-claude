@@ -11,11 +11,13 @@ impl ComputePipeline {
         device: &Device,
         camera_bind_group_layout: &BindGroupLayout,
         performance_bind_group_layout: &BindGroupLayout,
+        octree_bind_group_layout: &BindGroupLayout,
     ) -> Self {
         Self::new_with_format(
             device,
             camera_bind_group_layout,
             performance_bind_group_layout,
+            octree_bind_group_layout,
             TextureFormat::Rgba8Unorm,
         )
     }
@@ -24,6 +26,7 @@ impl ComputePipeline {
         device: &Device,
         camera_bind_group_layout: &BindGroupLayout,
         performance_bind_group_layout: &BindGroupLayout,
+        octree_bind_group_layout: &BindGroupLayout,
         output_format: TextureFormat,
     ) -> Self {
         info!("Creating compute pipeline with format {:?}", output_format);
@@ -56,6 +59,7 @@ impl ComputePipeline {
                 &output_bind_group_layout,
                 camera_bind_group_layout,
                 performance_bind_group_layout,
+                octree_bind_group_layout,
             ],
             push_constant_ranges: &[],
         });
@@ -82,6 +86,7 @@ impl ComputePipeline {
         output_texture: &TextureView,
         camera_bind_group: &BindGroup,
         performance_bind_group: &BindGroup,
+        octree_bind_group: &BindGroup,
         width: u32,
         height: u32,
     ) {
@@ -105,6 +110,7 @@ impl ComputePipeline {
         compute_pass.set_bind_group(0, &output_bind_group, &[]);
         compute_pass.set_bind_group(1, camera_bind_group, &[]);
         compute_pass.set_bind_group(2, performance_bind_group, &[]);
+        compute_pass.set_bind_group(3, octree_bind_group, &[]);
 
         let workgroup_size = 8;
         let num_workgroups_x = (width + workgroup_size - 1) / workgroup_size;

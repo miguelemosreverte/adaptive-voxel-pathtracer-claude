@@ -14,6 +14,8 @@ struct PerformanceData {
 @group(0) @binding(0) var output_texture: texture_storage_2d<rgba8unorm, write>;
 @group(1) @binding(0) var<uniform> camera_data: CameraData;
 @group(2) @binding(0) var<uniform> performance_data: PerformanceData;
+@group(3) @binding(0) var octree_texture: texture_3d<f32>;
+@group(3) @binding(1) var octree_sampler: sampler;
 
 fn get_ray_direction(screen_uv: vec2<f32>, camera: CameraData) -> vec3<f32> {
     // Convert to NDC, but flip Y to correct for inverted image
@@ -64,88 +66,13 @@ fn ray_box_intersection(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3
     return vec2<f32>(max(t_near, 0.0), t_far);
 }
 
-fn sample_voxel(position: vec3<f32>) -> vec4<f32> {
-    // Cornell Box scene - standard dimensions
-    // The box goes from -1 to 1 in X, 0 to 2 in Y, 0 to 2 in Z
-    // Camera looks from negative Z towards positive Z (into the box)
+fn sample_voxel_from_octree(position: vec3<f32>) -> vec4<f32> {
+    // Convert world position to texture coordinates
+    // Octree covers -2 to 2 in all dimensions, texture is 0 to 1
+    let texture_coords = (position + vec3<f32>(2.0, 2.0, 2.0)) / 4.0;
 
-    let wall_thickness = 0.05;  // Thicker walls to ensure they're hit
-
-    // Floor (white)
-    if position.y >= -wall_thickness && position.y <= wall_thickness {
-        if position.x >= -1.0 && position.x <= 1.0 && position.z >= 0.0 && position.z <= 2.0 {
-            return vec4<f32>(0.73, 0.73, 0.73, 1.0);
-        }
-    }
-
-    // Ceiling (white)
-    if position.y >= 2.0 - wall_thickness && position.y <= 2.0 + wall_thickness {
-        if position.x >= -1.0 && position.x <= 1.0 && position.z >= 0.0 && position.z <= 2.0 {
-            // Light source in center of ceiling
-            if position.x >= -0.25 && position.x <= 0.25 && position.z >= 0.75 && position.z <= 1.25 {
-                return vec4<f32>(1.0, 1.0, 0.95, 1.0); // Light emission
-            }
-            return vec4<f32>(0.73, 0.73, 0.73, 1.0);
-        }
-    }
-
-    // Back wall (white) - at far Z
-    if position.z >= 2.0 - wall_thickness && position.z <= 2.0 + wall_thickness {
-        if position.x >= -1.0 - wall_thickness && position.x <= 1.0 + wall_thickness &&
-           position.y >= -wall_thickness && position.y <= 2.0 + wall_thickness {
-            return vec4<f32>(0.73, 0.73, 0.73, 1.0);
-        }
-    }
-
-    // Left wall (red)
-    if position.x >= -1.0 - wall_thickness && position.x <= -1.0 + wall_thickness {
-        if position.z >= 0.0 && position.z <= 2.0 && position.y >= 0.0 && position.y <= 2.0 {
-            return vec4<f32>(0.65, 0.05, 0.05, 1.0);
-        }
-    }
-
-    // Right wall (green)
-    if position.x >= 1.0 - wall_thickness && position.x <= 1.0 + wall_thickness {
-        if position.z >= 0.0 && position.z <= 2.0 && position.y >= 0.0 && position.y <= 2.0 {
-            return vec4<f32>(0.12, 0.45, 0.15, 1.0);
-        }
-    }
-
-    // Note: Cornell Box traditionally has no front wall (open where camera looks from)
-
-    // Tall box (white) - on the floor, left side
-    let tall_center = vec3<f32>(-0.35, 0.3, 0.65);
-    let tall_half_size = vec3<f32>(0.15, 0.3, 0.15);
-
-    // Rotate around Y axis by about 17 degrees
-    let cos_a = 0.956;
-    let sin_a = -0.292;
-    let offset = position - tall_center;
-    let rotated_x = offset.x * cos_a - offset.z * sin_a;
-    let rotated_z = offset.x * sin_a + offset.z * cos_a;
-
-    if abs(rotated_x) <= tall_half_size.x &&
-       position.y >= 0.0 && position.y <= tall_half_size.y * 2.0 &&
-       abs(rotated_z) <= tall_half_size.z {
-        return vec4<f32>(0.73, 0.73, 0.73, 1.0);
-    }
-
-    // Short box (white) - on the floor, right side
-    let short_center = vec3<f32>(0.35, 0.15, 1.35);
-    let short_half_size = vec3<f32>(0.15, 0.15, 0.15);
-
-    // Rotate around Y axis by about -17 degrees
-    let offset2 = position - short_center;
-    let rotated_x2 = offset2.x * cos_a + offset2.z * sin_a;
-    let rotated_z2 = -offset2.x * sin_a + offset2.z * cos_a;
-
-    if abs(rotated_x2) <= short_half_size.x &&
-       position.y >= 0.0 && position.y <= short_half_size.y * 2.0 &&
-       abs(rotated_z2) <= short_half_size.z {
-        return vec4<f32>(0.73, 0.73, 0.73, 1.0);
-    }
-
-    return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    // Sample the 3D texture
+    return textureSampleLevel(octree_texture, octree_sampler, texture_coords, 0.0);
 }
 
 fn volume_scatter(accumulated_color: vec4<f32>, voxel_data: vec4<f32>, step_size: f32) -> vec4<f32> {
@@ -196,7 +123,7 @@ fn ray_march_compute(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let distance_from_camera = length(current_pos - ray_origin);
             let step_size = get_adaptive_step_size(distance_from_camera, performance_data.base_voxel_size);
 
-            let voxel_data = sample_voxel(current_pos);
+            let voxel_data = sample_voxel_from_octree(current_pos);
 
             // If we hit a solid voxel, use its color directly
             if voxel_data.a > 0.5 {

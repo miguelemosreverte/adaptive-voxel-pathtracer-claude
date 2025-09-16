@@ -18,6 +18,7 @@ use chrono::Local;
 mod renderer;
 use renderer::VoxelRenderer;
 mod benchmark;
+mod octree;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -587,11 +588,18 @@ async fn render_screenshot_frame(
     });
     let compute_texture_view = compute_texture.create_view(&TextureViewDescriptor::default());
 
+    // Create octree provider
+    use octree::{OctreeProvider, static_provider::StaticOctreeProvider};
+    let mut octree_provider = Box::new(StaticOctreeProvider::new_cornell_box());
+    octree_provider.create_texture(device, queue);
+    let (octree_bind_group_layout, octree_bind_group) = octree_provider.bind_gpu_resources(device);
+
     // Create compute pipeline
     let compute_pipeline = renderer::compute_pipeline::ComputePipeline::new(
         device,
         &camera_bind_group_layout,
         &performance_bind_group_layout,
+        &octree_bind_group_layout,
     );
 
     // Create blit pipeline
@@ -609,6 +617,7 @@ async fn render_screenshot_frame(
         &compute_texture_view,
         &camera_bind_group,
         &performance_bind_group,
+        &octree_bind_group,
         width,
         height,
     );

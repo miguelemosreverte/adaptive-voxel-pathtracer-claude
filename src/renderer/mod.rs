@@ -13,6 +13,7 @@ pub mod performance_monitor;
 use compute_pipeline::ComputePipeline;
 use performance::PerformanceController;
 use blit_pipeline::BlitPipeline;
+use crate::octree::{OctreeProvider, static_provider::StaticOctreeProvider};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
@@ -44,6 +45,9 @@ pub struct VoxelRenderer {
     performance_buffer: Buffer,
     performance_bind_group: BindGroup,
     performance_controller: PerformanceController,
+    octree_provider: Box<dyn OctreeProvider>,
+    octree_bind_group_layout: BindGroupLayout,
+    octree_bind_group: BindGroup,
     output_texture: Texture,
     output_texture_view: TextureView,
     last_frame_time: Instant,
@@ -53,7 +57,7 @@ pub struct VoxelRenderer {
 impl VoxelRenderer {
     pub fn new(
         device: &Device,
-        _queue: &Queue,
+        queue: &Queue,
         adapter: &Adapter,
         surface: Surface<'static>,
         width: u32,
@@ -156,11 +160,19 @@ impl VoxelRenderer {
             ],
         });
 
-        // Create compute pipeline
+        // Create octree provider and initialize 3D texture
+        let mut octree_provider = Box::new(StaticOctreeProvider::new_cornell_box());
+        octree_provider.create_texture(device, queue);
+
+        // Get octree bind group resources
+        let (octree_bind_group_layout, octree_bind_group) = octree_provider.bind_gpu_resources(device);
+
+        // Create compute pipeline with octree support
         let compute_pipeline = ComputePipeline::new(
             device,
             &camera_bind_group_layout,
             &performance_bind_group_layout,
+            &octree_bind_group_layout,
         );
 
         // Create blit pipeline for format conversion
@@ -196,6 +208,9 @@ impl VoxelRenderer {
             performance_buffer,
             performance_bind_group,
             performance_controller,
+            octree_provider,
+            octree_bind_group_layout,
+            octree_bind_group,
             output_texture,
             output_texture_view,
             last_frame_time: Instant::now(),
@@ -305,13 +320,14 @@ impl VoxelRenderer {
             label: Some("Render Encoder"),
         });
 
-        // Run compute shader on our storage texture
+        // Run compute shader on our storage texture with octree data
         self.compute_pipeline.dispatch(
             device,
             &mut encoder,
             &self.output_texture_view,
             &self.camera_bind_group,
             &self.performance_bind_group,
+            &self.octree_bind_group,
             self.surface_config.width,
             self.surface_config.height,
         );
