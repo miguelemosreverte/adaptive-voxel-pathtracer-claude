@@ -4,6 +4,8 @@
 
 ## ✨ Phase 1 Complete! - Cornell Box with Adaptive Performance
 
+![Cornell Box Renderer - Phase 1 Complete](./cornell_box_phase1.png)
+
 We've successfully completed Phase 1 of the adaptive voxel path tracer! The renderer now features a fully functional Cornell Box scene with real-time adaptive performance scaling that maintains your target FPS.
 
 ### 🎯 Current Features (Phase 1)
