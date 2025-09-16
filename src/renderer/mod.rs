@@ -2,7 +2,7 @@ use wgpu::*;
 use wgpu::util::DeviceExt;
 use nalgebra as na;
 use bytemuck::{Pod, Zeroable};
-use log::{info, debug};
+use log::info;
 use std::time::Instant;
 
 pub mod compute_pipeline;
@@ -58,8 +58,9 @@ impl VoxelRenderer {
         surface: Surface<'static>,
         width: u32,
         height: u32,
+        target_fps: f32,
     ) -> Self {
-        info!("Creating VoxelRenderer with resolution {}x{}", width, height);
+        info!("Creating VoxelRenderer with resolution {}x{}, target FPS: {}", width, height, target_fps);
 
         let surface_caps = surface.get_capabilities(adapter);
         let surface_format = surface_caps.formats.iter()
@@ -182,8 +183,8 @@ impl VoxelRenderer {
         });
         let output_texture_view = output_texture.create_view(&TextureViewDescriptor::default());
 
-        // Create performance controller - targeting 60 FPS minimum
-        let performance_controller = PerformanceController::new(60.0);
+        // Create performance controller with user-specified target FPS
+        let performance_controller = PerformanceController::new(target_fps);
 
         Self {
             surface,

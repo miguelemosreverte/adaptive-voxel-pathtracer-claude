@@ -65,6 +65,10 @@ struct Args {
     /// Run performance benchmark
     #[arg(long)]
     benchmark: bool,
+
+    /// Target FPS for adaptive quality system
+    #[arg(long, default_value_t = 60.0)]
+    target_fps: f32,
 }
 
 fn main() {
@@ -77,7 +81,7 @@ async fn run(args: Args) {
     info!("Starting Adaptive Voxel Path Tracer");
 
     if args.benchmark {
-        benchmark::run_performance_benchmark().await;
+        benchmark::run_performance_benchmark(args.target_fps).await;
     } else if args.screenshot {
         info!("Screenshot mode enabled");
         run_screenshot_mode(args).await;
@@ -227,6 +231,7 @@ impl Application {
 }
 
 async fn run_interactive_mode(args: Args) {
+    info!("Target FPS: {}", args.target_fps);
     let event_loop = EventLoop::new().unwrap();
 
     #[allow(deprecated)]
@@ -255,7 +260,7 @@ async fn run_interactive_mode(args: Args) {
     ).await.unwrap();
 
     let size = window.inner_size();
-    let renderer = VoxelRenderer::new(&device, &queue, &adapter, surface, size.width, size.height);
+    let renderer = VoxelRenderer::new(&device, &queue, &adapter, surface, size.width, size.height, args.target_fps);
     let mut app = Application::new(device, queue, renderer);
 
     // Capture mouse cursor for FPS controls
@@ -320,12 +325,12 @@ async fn run_interactive_mode(args: Args) {
 
 async fn run_screenshot_mode(args: Args) {
     use renderer::performance_monitor::PerformanceMonitor;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     info!("Initializing headless screenshot renderer");
 
     // If duration is specified, we'll run for that long before taking screenshot
-    let run_duration = if args.duration > 0.0 {
+    let _run_duration = if args.duration > 0.0 {
         Some(Duration::from_secs_f32(args.duration))
     } else {
         None

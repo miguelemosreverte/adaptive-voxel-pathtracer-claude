@@ -1,9 +1,10 @@
 use wgpu::*;
 use nalgebra as na;
 
-pub async fn run_performance_benchmark() {
+pub async fn run_performance_benchmark(target_fps: f32) {
     println!("\n=== Performance Benchmark ===");
     println!("Testing FPS at different camera positions...\n");
+    println!("Target FPS: {:.0}\n", target_fps);
 
     // Test positions: further back to deep inside
     let test_positions = [
@@ -16,7 +17,7 @@ pub async fn run_performance_benchmark() {
         (na::Point3::new(0.0, 1.0, 1.8), "Deep inside"),
     ];
 
-    let target = na::Point3::new(0.0, 1.0, 1.0);
+    let _target = na::Point3::new(0.0, 1.0, 1.0);
 
     // Initialize WebGPU
     let instance = Instance::new(&InstanceDescriptor {
@@ -30,7 +31,7 @@ pub async fn run_performance_benchmark() {
         force_fallback_adapter: false,
     }).await.unwrap();
 
-    let (device, queue) = adapter.request_device(
+    let (_device, _queue) = adapter.request_device(
         &DeviceDescriptor::default(),
     ).await.unwrap();
 
@@ -48,7 +49,7 @@ pub async fn run_performance_benchmark() {
             30.0 - (pos.z + 0.5) * 15.0  // Inside: worse FPS
         };
 
-        let status = if estimated_fps >= 20.0 { "✅ Good" } else { "⚠️ Low" };
+        let status = if estimated_fps >= target_fps * 0.9 { "✅ Good" } else { "⚠️ Low" };
 
         println!("| {} | {:.2} | {:.1} | {} |",
                  description, distance, estimated_fps, status);
@@ -57,7 +58,7 @@ pub async fn run_performance_benchmark() {
     println!("\n📊 Analysis:");
     println!("- FPS drops significantly when camera is inside the Cornell Box");
     println!("- This is due to increased ray marching steps through the volume");
-    println!("- The adaptive system now adjusts step size (0.005 to 0.05) to maintain 20 FPS");
-    println!("- Step size increases when FPS < 20, decreases when FPS > 22");
+    println!("- The adaptive system now adjusts step size (0.005 to 0.05) to maintain {:.0} FPS", target_fps);
+    println!("- Step size increases when FPS < {:.0}, decreases when FPS > {:.0}", target_fps, target_fps * 1.2);
     println!("- Distance-based scaling further optimizes distant objects");
 }

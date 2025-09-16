@@ -39,13 +39,15 @@ impl PerformanceController {
         let avg_frame_time = self.average_frame_time();
         let avg_fps = 1.0 / avg_frame_time;
 
-        // CRITICAL: If current FPS drops below 60, react IMMEDIATELY
-        if current_fps < 58.0 {
-            // Emergency increase - big jump to get back above 60 FPS
-            let panic_multiplier = 60.0 / current_fps.max(10.0);  // How much we need to improve
+        // CRITICAL: If current FPS drops below target, react IMMEDIATELY
+        let emergency_threshold = self.target_framerate * 0.95;  // 5% below target
+        if current_fps < emergency_threshold {
+            // Emergency increase - big jump to get back above target FPS
+            let panic_multiplier = self.target_framerate / current_fps.max(10.0);  // How much we need to improve
             self.current_voxel_size = (self.current_voxel_size * panic_multiplier.min(2.0)).min(0.05);
 
-            log::info!("⚠️ EMERGENCY: FPS {:.1} < 60! Step size -> {:.4}", current_fps, self.current_voxel_size);
+            log::info!("⚠️ EMERGENCY: FPS {:.1} < {:.1}! Step size -> {:.4}",
+                      current_fps, self.target_framerate, self.current_voxel_size);
             self.last_adjustment_direction = 1;
             self.stable_frames = 0;
             return Some(self.current_voxel_size);
@@ -57,7 +59,7 @@ impl PerformanceController {
             adjustment_factor = 0.5;  // Smaller adjustments when unstable
         }
 
-        if avg_fps < 60.0 {
+        if avg_fps < self.target_framerate {
             // Below target: increase step size for better performance
             let scale = 1.0 + (0.3 * adjustment_factor);  // Less aggressive when dampened
 
@@ -74,8 +76,8 @@ impl PerformanceController {
             self.stable_frames = 0;
             Some(self.current_voxel_size)
 
-        } else if avg_fps > 70.0 && self.stable_frames > 15 {
-            // Only improve quality if we've been stable for a while
+        } else if avg_fps > self.target_framerate * 1.2 && self.stable_frames > 15 {
+            // Only improve quality if we've been stable and well above target
             let scale = 1.0 - (0.1 * adjustment_factor);
             self.current_voxel_size = (self.current_voxel_size * scale).max(0.005);
 
@@ -85,7 +87,7 @@ impl PerformanceController {
             Some(self.current_voxel_size)
 
         } else {
-            // In the sweet spot (60-70 FPS)
+            // In the sweet spot (target to target+20%)
             self.stable_frames += 1;
             None
         }
