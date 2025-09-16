@@ -1,10 +1,54 @@
 # **Adaptive Voxel Path Tracer: Technical Specification**
 *Real-time WebGPU implementation with dynamic Level-of-Detail*
 
-**Date**: September 16, 2025  
-**Target Platform**: WebGPU + Rust (wgpu crate)  
-**Performance Goal**: 20+ FPS on Apple M1 MacBook  
+**Date**: September 16, 2025
+**Target Platform**: WebGPU + Rust (wgpu crate)
+**Performance Goal**: 20+ FPS on Apple M1 MacBook
 **Reference Repository**: [Zydak/Vulkan-Path-Tracer](https://github.com/Zydak/Vulkan-Path-Tracer)
+
+---
+
+## **🤖 Important: AI Development Workflow**
+
+### **Screenshot Mode for Visual Verification**
+
+When developing or debugging this renderer with AI assistance, **always use screenshot mode** instead of running the interactive application. This allows the AI to verify what is actually being rendered.
+
+**Why Screenshot Mode?**
+- AI assistants cannot see the interactive window
+- Screenshots provide visual proof of rendering correctness
+- Command-line arguments allow precise camera control
+- Filenames include all parameters for reproducibility
+
+**How to Use Screenshot Mode:**
+```bash
+# Take a screenshot with default camera position (5,5,5) looking at origin
+cargo run -- --screenshot
+
+# Custom camera position and look-at target
+cargo run -- --screenshot --cam-x 10 --cam-y 8 --cam-z 10 --look-x 0 --look-y 0 --look-z 0
+
+# Different resolution
+cargo run -- --screenshot --width 1920 --height 1080 --cam-x 3 --cam-y 3 --cam-z 3
+```
+
+**Screenshot Output:**
+- Files are saved in the working directory
+- Filename format: `screenshot_YYYYMMDD_HHMMSS_cam_X_Y_Z_look_X_Y_Z_WIDTHxHEIGHT.png`
+- Example: `screenshot_20250916_143022_cam_5.0_5.0_5.0_look_0.0_0.0_0.0_1280x720.png`
+
+**Expected Scene (as of initial implementation):**
+- A red cube at the origin (±1 unit in each dimension)
+- A checkered floor plane at y=-1
+- Blue gradient background (sky)
+
+**Development Pattern:**
+1. Make changes to the renderer
+2. Run in screenshot mode with specific camera angles
+3. AI can use `Read` tool to view the PNG file and verify correctness
+4. Iterate based on visual feedback
+
+This approach ensures that both human developers and AI assistants can verify the visual output of the renderer during development.
 
 ---
 
