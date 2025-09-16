@@ -34,9 +34,16 @@ fn get_ray_direction(screen_uv: vec2<f32>, camera: CameraData) -> vec3<f32> {
 }
 
 fn get_adaptive_step_size(distance_from_camera: f32, base_voxel_size: f32) -> f32 {
-    // Use very small steps to ensure we don't miss thin walls
-    // Wall thickness is 0.02, so use step size < wall_thickness/2
-    return 0.005;
+    // Adaptive step size based on performance feedback
+    // base_voxel_size is adjusted by the performance controller (0.005 to 0.05)
+    // Apply distance-based scaling on top of performance-based sizing
+    let distance_factor = 1.0 + distance_from_camera * 0.1; // Increase step size with distance
+
+    // Minimum step to not miss walls (wall thickness is 0.05)
+    let min_step = 0.005;
+    let max_step = 0.05;
+
+    return clamp(base_voxel_size * distance_factor, min_step, max_step);
 }
 
 fn ray_box_intersection(ray_origin: vec3<f32>, ray_dir: vec3<f32>, box_min: vec3<f32>, box_max: vec3<f32>) -> vec2<f32> {

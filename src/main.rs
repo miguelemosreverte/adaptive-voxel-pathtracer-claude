@@ -8,6 +8,7 @@ use winit::{
 };
 use std::collections::HashSet;
 use nalgebra as na;
+use std::time::Instant;
 use env_logger;
 use log::info;
 use std::sync::Arc;
@@ -16,6 +17,7 @@ use chrono::Local;
 
 mod renderer;
 use renderer::VoxelRenderer;
+mod benchmark;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -55,6 +57,14 @@ struct Args {
     /// Window height
     #[arg(long, default_value_t = 720)]
     height: u32,
+
+    /// Duration to run before taking screenshot (seconds)
+    #[arg(long, default_value_t = 0.0)]
+    duration: f32,
+
+    /// Run performance benchmark
+    #[arg(long)]
+    benchmark: bool,
 }
 
 fn main() {
@@ -66,7 +76,9 @@ fn main() {
 async fn run(args: Args) {
     info!("Starting Adaptive Voxel Path Tracer");
 
-    if args.screenshot {
+    if args.benchmark {
+        benchmark::run_performance_benchmark().await;
+    } else if args.screenshot {
         info!("Screenshot mode enabled");
         run_screenshot_mode(args).await;
     } else {
@@ -84,6 +96,8 @@ struct Application {
     camera_speed: f32,
     mouse_sensitivity: f32,
     keys_pressed: HashSet<KeyCode>,
+    performance_monitor: renderer::performance_monitor::PerformanceMonitor,
+    last_frame_time: Instant,
 }
 
 impl Application {
@@ -98,6 +112,8 @@ impl Application {
             camera_speed: 0.05,
             mouse_sensitivity: 0.002,
             keys_pressed: HashSet::new(),
+            performance_monitor: renderer::performance_monitor::PerformanceMonitor::new(),
+            last_frame_time: Instant::now(),
         }
     }
 
@@ -173,7 +189,36 @@ impl Application {
     }
 
     fn render(&mut self) {
+        // Track frame time
+        let now = Instant::now();
+        let frame_time = now.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = now;
+
+        // Record performance data
+        self.performance_monitor.record_frame(
+            frame_time,
+            Some([self.camera_position.x, self.camera_position.y, self.camera_position.z])
+        );
+
+        // Show FPS in console periodically
+        if self.performance_monitor.total_frames % 60 == 0 {
+            info!("FPS: {:.1} | Camera: ({:.2}, {:.2}, {:.2})",
+                  self.performance_monitor.get_current_fps(),
+                  self.camera_position.x,
+                  self.camera_position.y,
+                  self.camera_position.z);
+        }
+
         self.renderer.render(&self.device, &self.queue);
+    }
+
+    fn save_performance_report(&self) {
+        let filename = format!("performance_report_{}.md",
+                              chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        match self.performance_monitor.generate_report(&filename) {
+            Ok(_) => info!("Performance report saved to: {}", filename),
+            Err(e) => log::error!("Failed to save performance report: {}", e),
+        }
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -250,8 +295,9 @@ async fn run_interactive_mode(args: Args) {
                     } => {
                         app.handle_key(keycode, state);
 
-                        // Escape key to exit
+                        // Escape key to exit and save report
                         if keycode == KeyCode::Escape && state == ElementState::Pressed {
+                            app.save_performance_report();
                             control_flow.exit();
                         }
                     }
@@ -273,7 +319,17 @@ async fn run_interactive_mode(args: Args) {
 }
 
 async fn run_screenshot_mode(args: Args) {
+    use renderer::performance_monitor::PerformanceMonitor;
+    use std::time::{Duration, Instant};
+
     info!("Initializing headless screenshot renderer");
+
+    // If duration is specified, we'll run for that long before taking screenshot
+    let run_duration = if args.duration > 0.0 {
+        Some(Duration::from_secs_f32(args.duration))
+    } else {
+        None
+    };
 
     // Initialize WebGPU without a window
     let instance = Instance::new(&InstanceDescriptor {

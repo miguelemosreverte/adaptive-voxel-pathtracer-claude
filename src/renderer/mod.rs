@@ -8,6 +8,7 @@ use std::time::Instant;
 pub mod compute_pipeline;
 pub mod performance;
 pub mod blit_pipeline;
+pub mod performance_monitor;
 
 use compute_pipeline::ComputePipeline;
 use performance::PerformanceController;
@@ -116,7 +117,7 @@ impl VoxelRenderer {
 
         // Create performance uniform buffer
         let performance_data = PerformanceData {
-            base_voxel_size: 1.0,
+            base_voxel_size: 0.02,  // Start with high performance for 60 FPS
             frame_time: 0.016,
             _padding: [0.0; 2],
         };
@@ -181,8 +182,8 @@ impl VoxelRenderer {
         });
         let output_texture_view = output_texture.create_view(&TextureViewDescriptor::default());
 
-        // Create performance controller
-        let performance_controller = PerformanceController::new(20.0);
+        // Create performance controller - targeting 60 FPS minimum
+        let performance_controller = PerformanceController::new(60.0);
 
         Self {
             surface,
@@ -275,7 +276,8 @@ impl VoxelRenderer {
 
         // Update performance controller
         if let Some(new_voxel_size) = self.performance_controller.update(delta_time) {
-            debug!("Adjusting base voxel size to: {}", new_voxel_size);
+            let fps = 1.0 / delta_time;
+            info!("📊 Adjusting step size: {:.4} (FPS: {:.1})", new_voxel_size, fps);
             let performance_data = PerformanceData {
                 base_voxel_size: new_voxel_size,
                 frame_time: delta_time,

@@ -6,16 +6,20 @@ pub struct PerformanceController {
     frame_time_history: VecDeque<f32>,
     adjustment_rate: f32,
     history_size: usize,
+    last_adjustment_direction: i8,  // -1 for decrease, 0 for none, 1 for increase
+    stable_frames: u32,  // Count frames at stable performance
 }
 
 impl PerformanceController {
     pub fn new(target_framerate: f32) -> Self {
         Self {
             target_framerate,
-            current_voxel_size: 1.0,
-            frame_time_history: VecDeque::with_capacity(30),
-            adjustment_rate: 0.05,
-            history_size: 30,
+            current_voxel_size: 0.02,  // Start with high performance for 60 FPS target
+            frame_time_history: VecDeque::with_capacity(10),  // Smaller window for faster response
+            adjustment_rate: 0.1,
+            history_size: 10,  // Smaller history for quicker reaction
+            last_adjustment_direction: 0,
+            stable_frames: 0,
         }
     }
 
@@ -26,22 +30,63 @@ impl PerformanceController {
             self.frame_time_history.pop_front();
         }
 
-        if self.frame_time_history.len() < 10 {
+        // Need a few frames to make a decision
+        if self.frame_time_history.len() < 3 {
             return None;
         }
 
+        let current_fps = 1.0 / frame_time;
         let avg_frame_time = self.average_frame_time();
-        let target_frame_time = 1.0 / self.target_framerate;
+        let avg_fps = 1.0 / avg_frame_time;
 
-        if avg_frame_time > target_frame_time * 1.1 {
-            // Too slow: increase voxel size (reduce quality)
-            self.current_voxel_size = (self.current_voxel_size * 1.1).min(10.0);
+        // CRITICAL: If current FPS drops below 60, react IMMEDIATELY
+        if current_fps < 58.0 {
+            // Emergency increase - big jump to get back above 60 FPS
+            let panic_multiplier = 60.0 / current_fps.max(10.0);  // How much we need to improve
+            self.current_voxel_size = (self.current_voxel_size * panic_multiplier.min(2.0)).min(0.05);
+
+            log::info!("⚠️ EMERGENCY: FPS {:.1} < 60! Step size -> {:.4}", current_fps, self.current_voxel_size);
+            self.last_adjustment_direction = 1;
+            self.stable_frames = 0;
+            return Some(self.current_voxel_size);
+        }
+
+        // Check for oscillation - if we just adjusted in opposite direction, dampen
+        let mut adjustment_factor = 1.0;
+        if self.stable_frames < 10 {
+            adjustment_factor = 0.5;  // Smaller adjustments when unstable
+        }
+
+        if avg_fps < 60.0 {
+            // Below target: increase step size for better performance
+            let scale = 1.0 + (0.3 * adjustment_factor);  // Less aggressive when dampened
+
+            // Prevent oscillation
+            if self.last_adjustment_direction == -1 {
+                // We just decreased, now increasing - use smaller step
+                self.current_voxel_size = (self.current_voxel_size * (1.0 + 0.1 * adjustment_factor)).min(0.05);
+            } else {
+                self.current_voxel_size = (self.current_voxel_size * scale).min(0.05);
+            }
+
+            log::debug!("Performance low: FPS {:.1} -> step size {:.4}", avg_fps, self.current_voxel_size);
+            self.last_adjustment_direction = 1;
+            self.stable_frames = 0;
             Some(self.current_voxel_size)
-        } else if avg_frame_time < target_frame_time * 0.8 {
-            // Fast enough: decrease voxel size (increase quality)
-            self.current_voxel_size = (self.current_voxel_size * 0.95).max(0.1);
+
+        } else if avg_fps > 70.0 && self.stable_frames > 15 {
+            // Only improve quality if we've been stable for a while
+            let scale = 1.0 - (0.1 * adjustment_factor);
+            self.current_voxel_size = (self.current_voxel_size * scale).max(0.005);
+
+            log::debug!("Performance good: FPS {:.1} -> step size {:.4}", avg_fps, self.current_voxel_size);
+            self.last_adjustment_direction = -1;
+            self.stable_frames = 0;
             Some(self.current_voxel_size)
+
         } else {
+            // In the sweet spot (60-70 FPS)
+            self.stable_frames += 1;
             None
         }
     }
