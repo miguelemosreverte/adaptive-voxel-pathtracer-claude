@@ -18,11 +18,11 @@ pub struct StaticOctreeProvider {
 
 impl StaticOctreeProvider {
     pub fn new_cornell_box() -> Self {
-        // Create octree centered at the Cornell Box center
+        // Create octree centered at origin for simplicity
         // Cornell Box: X: -1 to 1, Y: 0 to 2, Z: 0 to 2
-        let center = na::Vector3::new(0.0, 1.0, 1.0);
+        let center = na::Vector3::new(0.0, 0.0, 0.0);
         let half_size = 2.0;  // Covers -2 to 2 in all dimensions
-        let max_depth = 7;  // 128x128x128 resolution at max depth
+        let max_depth = 8;  // 256x256x256 resolution at max depth for better quality
 
         let mut octree = Octree::new(center, half_size, max_depth);
 
@@ -37,17 +37,20 @@ impl StaticOctreeProvider {
             sampler: None,
             bind_group_layout: None,
             bind_group: None,
-            texture_size: 128,  // 128x128x128 3D texture
+            texture_size: 256,  // 256x256x256 3D texture for better quality
         }
     }
 
     fn build_cornell_box_scene(octree: &mut Octree) {
-        let resolution = 0.05;  // Sample resolution for building the scene
+        let resolution = 0.02;  // Finer resolution for better quality
+        let mut voxel_count = 0;
+        let mut ceiling_count = 0;
+        let mut light_count = 0;
 
         // Sample the scene and insert into octree
-        for x in -20..=20 {
-            for y in -5..=25 {
-                for z in -5..=25 {
+        for x in -60..=60 {
+            for y in -10..=110 {  // Extend Y range to ensure we capture ceiling at Y=2
+                for z in -10..=110 {
                     let pos = na::Vector3::new(
                         x as f32 * resolution,
                         y as f32 * resolution,
@@ -56,12 +59,22 @@ impl StaticOctreeProvider {
 
                     if let Some(voxel) = Self::sample_cornell_box_at(pos) {
                         octree.insert(pos, voxel);
+                        voxel_count += 1;
+
+                        // Count ceiling and light voxels for debugging
+                        if pos.y >= 1.95 && pos.y <= 2.05 {
+                            ceiling_count += 1;
+                            if pos.x >= -0.25 && pos.x <= 0.25 && pos.z >= 0.75 && pos.z <= 1.25 {
+                                light_count += 1;
+                            }
+                        }
                     }
                 }
             }
         }
 
-        info!("Built Cornell Box scene in octree");
+        info!("Built Cornell Box scene: {} total voxels, {} ceiling, {} light",
+              voxel_count, ceiling_count, light_count);
     }
 
     fn sample_cornell_box_at(pos: na::Vector3<f32>) -> Option<VoxelData> {
@@ -152,8 +165,8 @@ impl StaticOctreeProvider {
                 for x in 0..size {
                     let world_pos = na::Vector3::new(
                         (x as f32 / size as f32 - 0.5) * 4.0,  // -2 to 2
-                        (y as f32 / size as f32) * 4.0 - 2.0,   // -2 to 2
-                        (z as f32 / size as f32) * 4.0 - 2.0,   // -2 to 2
+                        (y as f32 / size as f32 - 0.5) * 4.0,  // -2 to 2
+                        (z as f32 / size as f32 - 0.5) * 4.0,  // -2 to 2
                     );
 
                     let voxel = self.octree.sample(world_pos, 0);
@@ -202,14 +215,14 @@ impl StaticOctreeProvider {
 
         let texture_view = texture.create_view(&TextureViewDescriptor::default());
 
-        // Create sampler
+        // Create sampler with linear filtering for smoother appearance
         let sampler = device.create_sampler(&SamplerDescriptor {
             label: Some("Octree Sampler"),
             address_mode_u: AddressMode::ClampToEdge,
             address_mode_v: AddressMode::ClampToEdge,
             address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Linear,
-            min_filter: FilterMode::Linear,
+            mag_filter: FilterMode::Linear,  // Linear for smoother interpolation
+            min_filter: FilterMode::Linear,  // Linear for smoother interpolation
             mipmap_filter: FilterMode::Nearest,
             ..Default::default()
         });

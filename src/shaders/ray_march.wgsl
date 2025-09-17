@@ -38,12 +38,14 @@ fn get_ray_direction(screen_uv: vec2<f32>, camera: CameraData) -> vec3<f32> {
 fn get_adaptive_step_size(distance_from_camera: f32, base_voxel_size: f32) -> f32 {
     // Adaptive step size based on performance feedback
     // base_voxel_size is adjusted by the performance controller (0.005 to 0.05)
+    // This is the KEY FEATURE - quality adapts to maintain target FPS!
+
     // Apply distance-based scaling on top of performance-based sizing
     let distance_factor = 1.0 + distance_from_camera * 0.1; // Increase step size with distance
 
-    // Minimum step to not miss walls (wall thickness is 0.05)
-    let min_step = 0.005;
-    let max_step = 0.05;
+    // Step size range matches the adaptive system's range
+    let min_step = 0.005;  // Minimum for quality
+    let max_step = 0.05;   // Maximum for performance
 
     return clamp(base_voxel_size * distance_factor, min_step, max_step);
 }
@@ -71,8 +73,11 @@ fn sample_voxel_from_octree(position: vec3<f32>) -> vec4<f32> {
     // Octree covers -2 to 2 in all dimensions, texture is 0 to 1
     let texture_coords = (position + vec3<f32>(2.0, 2.0, 2.0)) / 4.0;
 
+    // Clamp to valid texture range to avoid edge artifacts
+    let clamped_coords = clamp(texture_coords, vec3<f32>(0.0), vec3<f32>(1.0));
+
     // Sample the 3D texture
-    return textureSampleLevel(octree_texture, octree_sampler, texture_coords, 0.0);
+    return textureSampleLevel(octree_texture, octree_sampler, clamped_coords, 0.0);
 }
 
 fn volume_scatter(accumulated_color: vec4<f32>, voxel_data: vec4<f32>, step_size: f32) -> vec4<f32> {
